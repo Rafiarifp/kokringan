@@ -1,3 +1,4 @@
+# Kecualikan file sensitif, lokal, dan cache saja:
 .env
 *.session
 cookies.json
