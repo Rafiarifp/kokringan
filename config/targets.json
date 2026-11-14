@@ -1,0 +1,213 @@
+{
+  "settings": {
+    "timeframe": "1m",
+    "output_csv": "data/master_osint_data.csv",
+    "trends_csv": "data/trends_interest.csv",
+    "slang_file": "slang_dict.json"
+  },
+  "youtube": {
+    "enabled": true,
+    "queries": [
+      "nilai rupiah | IHSG | kenaikan PPN | PHK massal",
+      "PHK massal | buruh | aksi buruh | demo pabrik",
+      "judi online | judol | pinjaman online | pinjol ",
+      "kebocoran data | peretasan data | data bocor",
+      "KPK korupsi | sidang kasus korupsi | RUU perampasan aset",
+      "kebocoran data | peretasan | serangan siber terbaru | hoaks disinformasi",
+      "demo mahasiswa | aksi massa | tuntutan massa",
+      "aksi ojol | tuntutan ojol"
+    ],
+    "max_videos_per_query": 20,
+    "max_comments_per_video": 100
+  },
+  "news": {
+    "enabled": true,
+    "limit_per_feed": 200,
+    "feeds": [
+      {
+        "name": "Detik",
+        "url": "https://news.detik.com/berita/rss",
+        "topic": "Nasional"
+      },
+      {
+        "name": "Tempo",
+        "url": "https://rss.tempo.co/nasional",
+        "topic": "Nasional"
+      },
+      {
+        "name": "ANTARA",
+        "url": "https://www.antaranews.com/rss/terkini.xml",
+        "topic": "Nasional"
+      },
+      {
+        "name": "CNN Indonesia",
+        "url": "https://www.cnnindonesia.com/rss",
+        "topic": "Nasional"
+      },
+      {
+        "name": "CNBC Indonesia",
+        "url": "https://www.cnbcindonesia.com/news/rss",
+        "topic": "Ekonomi"
+      },
+      {
+        "name": "Liputan6",
+        "url": "https://feed.liputan6.com/rss/news",
+        "topic": "Nasional"
+      },
+      {
+        "name": "Republika",
+        "url": "https://republika.co.id/rss",
+        "topic": "Nasional"
+      },
+      {
+        "name": "Okezone",
+        "url": "https://www.okezone.com/rss",
+        "topic": "Nasional"
+      }
+    ]
+  },
+  "telegram": {
+    "enabled": true,
+    "limit_per_channel": 250,
+    "channels": [
+      "kompascomupdate",
+      "kumparancom",
+      "Idxtradingcomm",
+      "InfoDariAnda",
+      "timesindonesia",
+
+      "tempodotcoupdate",
+      "Today_Indonesia",
+      "liputan6newsupdate",
+      "CNBCIndonesiaOfficial",
+      "Kompas_TV",
+
+      "creativetrader",
+      "mardiguwp",
+      "KAHMINasionalRI",
+      "Indonesiabaik_ID",
+
+      "senopatikelud",
+      "MuslimahNews",
+      "AFUncensored",
+      "BukanAnonBerbayar_BackUp",
+      "indonesiabertauhid",
+      "opposite6890_xfire"
+    ]
+  },
+  "google_trends": {
+    "enabled": true,
+    "keywords": [
+      "IHSG",
+      "kurs rupiah",
+      "PPN 12 persen",
+      "PHK",
+      "pemerintah",
+      "presiden",
+      "boikot",
+      "polisi/polri",
+      "tentara/tni",
+      "judol",
+      "pinjol",
+      "kebocoran data/peretasan",
+      "PDNS",
+      "KPK",
+      "korupsi/kolusi/gratifikasi",
+      "RUU perampasan aset",
+      "DPR/DPRD",
+      "demo mahasiswa/aksi mahasiswa/tuntutan mahasiswa",
+      "demo buruh/aksi buruh/tuntutan buruh",
+      "aksi ojol/keluhan ojol",
+      "umr/ump"
+    ]
+  },
+  "x": {
+    "enabled": false,
+    "limit_per_query": 50,
+    "cookies_path": "cookies.json",
+    "queries": [
+      "judi online OR judol OR pinjol",
+      "kebocoran data OR peretasan",
+      "KPK korupsi OR RUU perampasan aset",
+      "demo mahasiswa OR PHK massal",
+      "kenaikan PPN OR nilai rupiah OR IHSG"
+    ]
+  },
+  "topic_filters": {
+    "enabled": true,
+    "topics": {
+      "nilai rupiah IHSG ekonomi": [
+        "nilai rupiah",
+        "rupiah",
+        "IHSG",
+        "indeks harga saham gabungan",
+        "kurs rupiah",
+        "nilai tukar rupiah"
+      ],
+      "kebijakan PPN pajak": [
+        "kenaikan PPN",
+        "PPN",
+        "pajak pertambahan nilai"
+      ],
+      "PHK massal buruh": [
+        "PHK",
+        "pemutusan hubungan kerja",
+        "buruh",
+        "aksi buruh",
+        "demo pabrik"
+      ],
+      "judi online judol pemberantasan": [
+        "judi online",
+        "judol",
+        "slot online",
+        "pemberantasan judi online"
+      ],
+      "pinjol ilegal terjerat": [
+        "pinjol",
+        "pinjaman online",
+        "pinjaman daring",
+        "pinjol ilegal"
+      ],
+      "kebocoran data peretasan Indonesia": [
+        "kebocoran data",
+        "peretasan",
+        "diretas",
+        "serangan siber",
+        "data breach",
+        "hacker"
+      ],
+      "hoaks disinformasi": [
+        "hoaks",
+        "hoax",
+        "disinformasi",
+        "misinformasi"
+      ],
+      "sidang kasus korupsi": [
+        "KPK",
+        "korupsi",
+        "suap",
+        "gratifikasi",
+        "sidang kasus korupsi"
+      ],
+      "RUU perampasan aset DPR": [
+        "RUU perampasan aset",
+        "perampasan aset",
+        "rampasan aset"
+      ],
+      "demo mahasiswa aksi massa": [
+        "demo mahasiswa",
+        "aksi mahasiswa",
+        "aksi massa",
+        "unjuk rasa",
+        "demonstrasi"
+      ],
+      "driver ojol aksi ojol": [
+        "driver ojol",
+        "ojol",
+        "pengemudi ojek online",
+        "aksi ojek online",
+        "tuntutan ojol"
+      ]
+    }
+  }
+}
