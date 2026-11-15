@@ -1,15 +1,8 @@
-"""
-Subprogram 2: Unified Neural Inference Engine.
-Consolidates sentiment_analysis_2.py, sarcasm_detection_2.py,
-combined_sentiment_analysis_2.py, and embedding generation from narrative_detection_2.py.
-Implements lazy model loading and explicit VRAM release between stages.
-"""
 from __future__ import annotations
-
 import gc
 import logging
+import os
 from typing import Any
-
 import numpy as np
 import pandas as pd
 import torch
@@ -24,6 +17,7 @@ from core.data_foundation import (
 
 logger = logging.getLogger(__name__)
 
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 SENTIMENT_MODEL_NAME = "mdhugol/indonesia-bert-sentiment-classification"
 SENTIMENT_MODEL_VERSION = "indobert-sentiment-v1"
 SENTIMENT_INDEX_MAP = {0: "positive", 1: "neutral", 2: "negative"}
@@ -75,31 +69,38 @@ class SequenceClassifierRunner:
             self.tokenizer = None
             release_memory()
 
-    def predict_probs(self, valid_texts: list[str], batch_size: int = 16) -> np.ndarray:
-        """Return an (N, num_labels) numpy array of softmax probabilities."""
-        if not valid_texts:
-            return np.empty((0, len(self.index_map)), dtype=np.float32)
+    def predict_probs(self, valid_texts: list[str], batch_size: int = 32) -> np.ndarray:
+            """Return an (N, num_labels) numpy array of softmax probabilities."""
+            if not valid_texts:
+                return np.empty((0, len(self.index_map)), dtype=np.float32)
 
-        self.load()
-        all_probs: list[np.ndarray] = []
+            self.load()
 
-        for start in range(0, len(valid_texts), batch_size):
-            batch = valid_texts[start : start + batch_size]
-            encoded = self.tokenizer(
-                batch,
-                padding=True,
-                truncation=True,
-                max_length=self.max_length,
-                return_tensors="pt",
-            )
-            encoded = {k: v.to(self.device) for k, v in encoded.items()}
+            # Deduplicate and length-sort to cut redundant inference and padding waste
+            unique_texts = list(dict.fromkeys(valid_texts))
+            text_to_uidx = {t: i for i, t in enumerate(unique_texts)}
+            order = sorted(range(len(unique_texts)), key=lambda i: len(unique_texts[i]))
+            sorted_texts = [unique_texts[i] for i in order]
 
-            with torch.no_grad():
-                logits = self.model(**encoded).logits
-                probs = torch.softmax(logits, dim=-1).cpu().numpy()
-                all_probs.append(probs)
+            all_probs: list[np.ndarray] = []
+            with torch.inference_mode():
+                for start in range(0, len(sorted_texts), batch_size):
+                    batch = sorted_texts[start : start + batch_size]
+                    encoded = self.tokenizer(
+                        batch,
+                        padding=True,
+                        truncation=True,
+                        max_length=self.max_length,
+                        return_tensors="pt",
+                    )
+                    encoded = {k: v.to(self.device) for k, v in encoded.items()}
+                    logits = self.model(**encoded).logits
+                    all_probs.append(torch.softmax(logits, dim=-1).cpu().numpy())
 
-        return np.vstack(all_probs)
+            sorted_probs = np.vstack(all_probs)
+            unique_probs = np.empty_like(sorted_probs)
+            unique_probs[order] = sorted_probs
+            return unique_probs[[text_to_uidx[t] for t in valid_texts]]
 
 
 class SentimentRunner(SequenceClassifierRunner):
@@ -108,7 +109,7 @@ class SentimentRunner(SequenceClassifierRunner):
     def __init__(self, model_name: str = SENTIMENT_MODEL_NAME, max_length: int = 128) -> None:
         super().__init__(model_name=model_name, index_map=SENTIMENT_INDEX_MAP, max_length=max_length)
 
-    def predict_batch(self, texts: list[str], batch_size: int = 16) -> list[dict[str, Any]]:
+    def predict_batch(self, texts: list[str], batch_size: int = 32) -> list[dict[str, Any]]:
         cleaned_list = [preprocess_text(t) for t in texts]
         valid_indices = [i for i, t in enumerate(cleaned_list) if t]
         valid_texts = [cleaned_list[i] for i in valid_indices]
@@ -151,7 +152,7 @@ class SarcasmRunner(SequenceClassifierRunner):
     def predict_batch(
         self,
         texts: list[str],
-        batch_size: int = 16,
+        batch_size: int = 32,
         confidence_threshold: float = 0.70,
     ) -> list[dict[str, Any]]:
         if not 0.0 <= confidence_threshold <= 1.0:
@@ -229,17 +230,22 @@ class EmbeddingRunner:
             release_memory()
 
     def encode(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
-        if not texts:
-            return np.empty((0, 384), dtype=np.float32)
-        self.load()
-        cleaned = [clean_text_for_embedding(t) or "empty" for t in texts]
-        embeddings = self.model.encode(
-            cleaned,
-            batch_size=batch_size,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )
-        return np.asarray(embeddings, dtype=np.float32)
+            if not texts:
+                return np.empty((0, 384), dtype=np.float32)
+            self.load()
+            cleaned = [clean_text_for_embedding(t) or "empty" for t in texts]
+            unique_texts = list(dict.fromkeys(cleaned))
+            text_to_uidx = {t: i for i, t in enumerate(unique_texts)}
+
+            with torch.inference_mode():
+                embeddings = self.model.encode(
+                    unique_texts,
+                    batch_size=batch_size,
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                )
+            unique_embs = np.asarray(embeddings, dtype=np.float32)
+            return unique_embs[[text_to_uidx[t] for t in cleaned]]
 
 
 def interpret_combined_result(
@@ -357,23 +363,34 @@ class InferenceEngine:
             self.sarcasm_runner.unload()
 
         # 3. Combined interpretation
+        n_rows = len(out)
+        post_ids = out["id"].tolist() if "id" in out.columns else [str(i) for i in range(n_rows)]
+        platforms = out["platform"].tolist() if "platform" in out.columns else ["UNKNOWN"] * n_rows
+        timestamps = (
+                    [ts.isoformat() if pd.notna(ts) else "" for ts in out["timestamp"]]
+                    if "timestamp" in out.columns
+                    else [""] * n_rows
+                )
+
         combined_results: list[dict[str, Any]] = []
-        for idx, (s_res, c_res) in enumerate(zip(sent_results, sarc_results)):
-            interp, review = interpret_combined_result(
-                sentiment=s_res["sentiment"],
-                is_sarcastic=c_res["is_sarcastic"],
-                sarcasm_status=c_res["sarcasm_status"],
-            )
-            combined_results.append({
-                "post_id": out.loc[idx, "id"] if "id" in out.columns else str(idx),
-                "platform": out.loc[idx, "platform"] if "platform" in out.columns else "UNKNOWN",
-                "timestamp": out.loc[idx, "timestamp"].isoformat() if "timestamp" in out.columns else "",
-                **s_res,
-                **c_res,
-                "interpretation": interp,
-                "needs_review": review,
-                "model_version": COMBINED_MODEL_VERSION,
-            })
+        for post_id, platform, timestamp, s_res, c_res in zip(
+            post_ids, platforms, timestamps, sent_results, sarc_results
+        ):
+                    interp, review = interpret_combined_result(
+                        sentiment=s_res["sentiment"],
+                        is_sarcastic=c_res["is_sarcastic"],
+                        sarcasm_status=c_res["sarcasm_status"],
+                    )
+                    combined_results.append({
+                        "post_id": post_id,
+                        "platform": platform,
+                        "timestamp": timestamp,
+                        **s_res,
+                        **c_res,
+                        "interpretation": interp,
+                        "needs_review": review,
+                        "model_version": COMBINED_MODEL_VERSION,
+                    })
 
         comb_df = pd.DataFrame(combined_results)
         for col in (
