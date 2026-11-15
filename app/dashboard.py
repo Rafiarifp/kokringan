@@ -1127,8 +1127,16 @@ def get_wordcloud_png(_filter_sig: tuple, sentiment: str, colors: tuple, _df: pd
 @st.cache_data(show_spinner=False, max_entries=4)
 def compute_disarm_analysis(_filter_sig: tuple, _df: pd.DataFrame, anomaly_alerts: list) -> dict:
     """Hitung metrik CIB, skor risiko DISARM, bukti duplikasi, dan tabel eksplorasi sekali per filter."""
-    txt_df = _df[_df["text"].str.strip() != ""]
-    dup_series = txt_df.groupby("text")["author"].unique()
+    txt_df = _df[_df["text"].str.strip() != ""].copy()
+    # Filter minimum 4 kata & 25 karakter agar komentar generik 1-2 kata tidak menjadi false positive CIB
+    clean_txt = (
+        txt_df["text"]
+        .str.replace(r"https?://\S+|@\w+|[^\w\s]", " ", regex=True)
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
+    valid_mask = (clean_txt.str.split().str.len() >= 4) & (clean_txt.str.len() >= 25)
+    dup_series = txt_df[valid_mask].groupby("text")["author"].unique()
     dup_series = dup_series[dup_series.str.len() > 1]
     duplicated_texts = dup_series.index.tolist()
 
@@ -1664,27 +1672,24 @@ with tab4:
     )
 
     default_gt_kws = [
-      "IHSG",
-      "kurs rupiah",
-      "PPN 12 persen",
-      "PHK",
-      "pemerintah",
-      "presiden",
-      "boikot",
-      "polisi/polri",
-      "tentara/tni",
-      "judol",
-      "pinjol",
-      "kebocoran data/peretasan",
-      "PDNS",
-      "KPK",
-      "korupsi/kolusi/gratifikasi",
-      "RUU perampasan aset",
-      "DPR/DPRD",
-      "demo mahasiswa/aksi mahasiswa/tuntutan mahasiswa",
-      "demo buruh/aksi buruh/tuntutan buruh",
-      "aksi ojol/keluhan ojol",
-      "umr/ump"
+        "IHSG",
+        "kurs rupiah",
+        "PPN 12 persen",
+        "PHK",
+        "pemerintah",
+        "presiden",
+        "boikot",
+        "polisi/polri",
+        "tentara/tni",
+        "judol",
+        "pinjol",
+        "kebocoran data",
+        "PDNS",
+        "KPK",
+        "RUU perampasan aset",
+        "demo mahasiswa",
+        "tarif ojol",
+        "upah minimum",
     ]
     for cfg_candidate in (ROOT_DIR / "config" / "targets.json", ROOT_DIR / "targets.json"):
         if cfg_candidate.exists():
@@ -1722,7 +1727,7 @@ with tab4:
             if not kws:
                 st.warning("Masukkan minimal 1 kata kunci.")
             else:
-                with st.spinner("Mengambil indeks minat pencarian dari Google Trends..."):
+                with st.spinner("Mengambil indeks minat pencarian dari Google Trends (multi-batch)..."):
                     try:
                         try:
                             from ingestion.scrape import scrape_google_trends_series, save_trends_csv
@@ -1731,11 +1736,17 @@ with tab4:
 
                         records = scrape_google_trends_series(kws, timeframe=tf_choice, geo="ID")
                         if not records:
-                            st.error("Google Trends mengembalikan data kosong (kena rate-limit HTTP 429). Coba lagi beberapa saat.")
+                            st.error(
+                                "Google Trends mengembalikan data kosong (kemungkinan terkena rate-limit HTTP 429 sementara). Coba lagi beberapa saat."
+                            )
                         else:
                             DATA_DIR.mkdir(parents=True, exist_ok=True)
-                            saved_rows = save_trends_csv(records, str(DATA_DIR / "trends_interest.csv"), replace=True)
+                            saved_rows = save_trends_csv(
+                                records, str(DATA_DIR / "trends_interest.csv"), replace=True
+                            )
                             st.cache_data.clear()
+                            st.session_state.pop("gt_filter_kw", None)
+                            st.session_state.pop("gt_filter_geo", None)
                             st.success(f"Berhasil menyimpan {saved_rows:,} titik data Google Trends.")
                             st.rerun()
                     except Exception as exc:
@@ -1744,7 +1755,10 @@ with tab4:
     if trends_status == "error":
         callout("bad", trends_payload["error"])
     elif trends_df.empty:
-        callout("info", "File data/trends_interest.csv masih kosong (0 titik). Gunakan panel di atas untuk menarik data.")
+        callout(
+            "info",
+            "File data/trends_interest.csv masih kosong (0 titik). Gunakan panel di atas atau sidebar OSINT Ingestion & Pipeline untuk menarik data.",
+        )
     else:
         geo_options = sorted(trends_df["geo"].unique().tolist())
         kw_options = sorted(trends_df["keyword"].unique().tolist())
@@ -1861,7 +1875,6 @@ with tab4:
                     aggfunc="mean",
                     fill_value=0,
                 )
-                # Pertahankan urutan kronologis kolom tanggal
                 ordered_cols = (
                     heat_df[["timestamp", "tanggal"]]
                     .drop_duplicates()

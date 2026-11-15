@@ -121,6 +121,18 @@
       "umr/ump"
     ]
   },
+  "instagram": {
+      "enabled": false,
+      "provider": "apify",
+      "queries": ["demo mahasiswa", "kebocoran data", "judol", "pinjol"],
+      "limit_per_query": 50
+    },
+    "threads": {
+      "enabled": false,
+      "provider": "apify",
+      "queries": ["pemerintah", "RUU perampasan aset", "tarif ojol"],
+      "limit_per_query": 50
+    },
   "x": {
     "enabled": false,
     "limit_per_query": 50,

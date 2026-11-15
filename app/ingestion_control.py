@@ -1,5 +1,6 @@
-"""Panel Streamlit untuk Delete Old Data / Update Data dan pipeline analitik."""
+"""Panel Streamlit untuk Delete Old Data / Update Data, konfigurasi API, dan pipeline analitik."""
 import json
+import os
 import subprocess
 import sys
 import time
@@ -8,7 +9,7 @@ import streamlit as st
 
 
 def _find_project_root() -> Path:
-    """Cari root folder proyek berdasarkan struktur folder baru."""
+    """Cari root folder proyek berdasarkan struktur folder proyek."""
     here = Path(__file__).resolve().parent
     for candidate in (here, *here.parents):
         if (candidate / "ingestion" / "main.py").is_file() and (candidate / "config" / "targets.json").is_file():
@@ -19,7 +20,9 @@ def _find_project_root() -> Path:
 ROOT_DIR = _find_project_root()
 MAIN_SCRIPT = ROOT_DIR / "ingestion" / "main.py"
 TARGETS_FILE = ROOT_DIR / "config" / "targets.json"
+ENV_FILE = ROOT_DIR / ".env"
 LOG_FILE = ROOT_DIR / "data" / "latest_run.log"
+
 TIMEFRAME_LABELS = {
     "1w": "7 hari terakhir",
     "1m": "1 bulan terakhir",
@@ -30,11 +33,20 @@ SOURCE_LABELS = {
     "news": "News RSS",
     "telegram": "Telegram",
     "google_trends": "Google Trends",
+    "instagram": "Instagram (API)",
+    "threads": "Threads (API)",
     "x": "X (Twitter)",
 }
-DATASET_SOURCES = {"youtube", "news", "telegram", "x"}
+DATASET_SOURCES = {"youtube", "news", "telegram", "x", "instagram", "threads"}
 
-# Nilai tetap untuk argumen --interval pada orchestrator lama.
+API_KEY_SPECS = [
+    ("INSTAGRAM_API_KEY", "Instagram Scraper API Key", "Token API berbayar (Apify/RapidAPI/Graph) untuk Instagram"),
+    ("THREADS_API_KEY", "Threads Scraper API Key", "Token API berbayar (Apify/RapidAPI/Graph) untuk Meta Threads"),
+    ("YOUTUBE_API_KEY", "YouTube Data API v3 Key", "Opsional: timpa key YouTube di .env"),
+    ("TELEGRAM_API_ID", "Telegram API ID", "Opsional: angka ID dari my.telegram.org"),
+    ("TELEGRAM_API_HASH", "Telegram API Hash", "Opsional: hash dari my.telegram.org"),
+]
+
 NLP_INTERVAL = "3h"
 ENRICHED_FILE = "data/master_osint_enriched.csv"
 REPORT_FILE = "data/cyberlens_report.json"
@@ -82,9 +94,90 @@ def _invalidate_previous_analysis() -> None:
             ) from exc
 
 
+def _upsert_env_file(updates: dict[str, str]) -> None:
+    """Simpan atau perbarui key di .env tanpa menghapus variabel lain yang sudah ada."""
+    existing_lines: list[str] = []
+    if ENV_FILE.exists():
+        existing_lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+
+    remaining = dict(updates)
+    new_lines: list[str] = []
+
+    for line in existing_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            new_lines.append(line)
+            continue
+
+        key = stripped.split("=", 1)[0].strip()
+        if key in remaining:
+            val = remaining.pop(key)
+            new_lines.append(f"{key}={val}")
+        else:
+            new_lines.append(line)
+
+    for key, val in remaining.items():
+        new_lines.append(f"{key}={val}")
+
+    ENV_FILE.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
+def render_api_config_panel() -> None:
+    """Panel konfigurasi API key langsung dari sidebar Streamlit (aman untuk demo)."""
+    try:
+        from dotenv import load_dotenv
+        if ENV_FILE.exists():
+            load_dotenv(ENV_FILE, override=False)
+    except ImportError:
+        pass
+
+    ig_ready = bool(os.getenv("INSTAGRAM_API_KEY", "").strip())
+    th_ready = bool(os.getenv("THREADS_API_KEY", "").strip())
+
+    with st.sidebar.expander("Konfigurasi API & Kredensial", expanded=False):
+        st.caption(
+            f"Status Konektor Berbayar: "
+            f"Instagram **{'Aktif' if ig_ready else 'Standby'}** · "
+            f"Threads **{'Aktif' if th_ready else 'Standby'}**"
+        )
+
+        with st.form("api_credentials_form", clear_on_submit=False):
+            inputs: dict[str, str] = {}
+            for env_key, label, help_text in API_KEY_SPECS:
+                current_val = os.getenv(env_key, "")
+                inputs[env_key] = st.text_input(
+                    label,
+                    value=current_val,
+                    type="password",
+                    placeholder="Kosongkan jika belum ada API key",
+                    help=help_text,
+                )
+
+            col_save, col_clear = st.columns([2, 1])
+            with col_save:
+                save_keys = st.form_submit_button("Simpan Kredensial", type="primary", use_container_width=True)
+            with col_clear:
+                clear_paid = st.form_submit_button("Reset IG/Threads", use_container_width=True)
+
+        if save_keys:
+            cleaned = {k: v.strip() for k, v in inputs.items()}
+            for k, v in cleaned.items():
+                os.environ[k] = v
+            _upsert_env_file(cleaned)
+            st.success("Kredensial berhasil disimpan ke memori sesi & file .env.")
+            st.rerun()
+
+        if clear_paid:
+            reset_map = {"INSTAGRAM_API_KEY": "", "THREADS_API_KEY": ""}
+            for k in reset_map:
+                os.environ[k] = ""
+            _upsert_env_file(reset_map)
+            st.info("Kredensial Instagram & Threads dikembalikan ke mode Standby.")
+            st.rerun()
+
+
 def render_ingestion_panel() -> None:
     """Scraping -> NLP wajib -> dashboard hanya menampilkan hasil analisis terbaru."""
-    # Hapus state widget lama yang sudah tidak dipakai (checkbox/interval opsional).
     for obsolete_key in (
         "osint_auto_analyze",
         "osint_interval",
@@ -110,6 +203,16 @@ def render_ingestion_panel() -> None:
             disabled=(st.session_state.osint_stage in ("scraping", "analyzing")),
             help="Sumber yang dipilih akan di-scrape sebelum analisis NLP dijalankan otomatis.",
         )
+
+        missing_paid_keys = []
+        if "instagram" in selected_sources and not os.getenv("INSTAGRAM_API_KEY", "").strip():
+            missing_paid_keys.append("INSTAGRAM_API_KEY")
+        if "threads" in selected_sources and not os.getenv("THREADS_API_KEY", "").strip():
+            missing_paid_keys.append("THREADS_API_KEY")
+        if missing_paid_keys:
+            st.caption(
+                f"Mode Standby API: isi `{', '.join(missing_paid_keys)}` pada panel **Konfigurasi API & Kredensial** di bawah untuk mengaktifkan."
+            )
 
         data_mode = st.selectbox(
             "Mode Pengelolaan Dataset",
@@ -147,29 +250,16 @@ def render_ingestion_panel() -> None:
         proc = st.session_state.osint_proc
         is_running = proc is not None and proc.poll() is None
         has_dataset_source = bool(set(selected_sources).intersection(DATASET_SOURCES))
-        trends_only = bool(selected_sources) and set(selected_sources) == {"google_trends"}
-
-        can_run = (
-            (has_dataset_source or (trends_only and not replace_existing))
-            and not is_running
-        )
 
         btn_col1, btn_col2 = st.columns([2, 1])
         with btn_col1:
-            btn_label = (
-                "Sedang Berjalan..."
-                if is_running
-                else (
-                    "Ambil Google Trends Saja"
-                    if trends_only
-                    else ("Delete Old Data · Scrape + Analisis" if replace_existing else "Update Data + Analisis")
-                )
-            )
             start_clicked = st.button(
-                btn_label,
+                ("Delete Old Data · Scrape + Analisis" if replace_existing else "Update Data + Analisis")
+                if not is_running else "Sedang Berjalan...",
                 type="primary",
                 use_container_width=True,
-                disabled=not can_run,
+                disabled=is_running or not has_dataset_source,
+                help="Pilih minimal satu sumber selain Google Trends untuk membangun master_osint_data.csv.",
             )
         with btn_col2:
             stop_clicked = st.button("Stop", use_container_width=True, disabled=not is_running)
@@ -177,7 +267,7 @@ def render_ingestion_panel() -> None:
         if selected_sources and not has_dataset_source:
             st.warning(
                 "Google Trends menyimpan data di `trends_interest.csv`; pilih minimal satu "
-                "dari YouTube, News RSS, Telegram, atau X untuk membangun dataset utama."
+                "dari YouTube, News RSS, Telegram, Instagram, Threads, atau X."
             )
         elif not selected_sources:
             st.info("Pilih minimal satu sumber data.")
@@ -221,10 +311,10 @@ def render_ingestion_panel() -> None:
                 ]
                 if replace_existing:
                     cmd.append("--replace-existing")
-                cmd.extend(["--sources", *selected_sources])
                 st.session_state.osint_proc = subprocess.Popen(
                     cmd,
                     cwd=str(ROOT_DIR),
+                    env=os.environ.copy(),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                 )
@@ -244,7 +334,6 @@ def render_ingestion_panel() -> None:
                 time.sleep(2.0)
                 st.rerun()
 
-            # Proses scraping selesai.
             elif st.session_state.osint_stage == "scraping":
                 st.session_state.osint_proc = None
                 if ret_code != 0:
@@ -256,7 +345,6 @@ def render_ingestion_panel() -> None:
                     st.cache_data.clear()
                     st.rerun()
 
-                # Scraping sukses: artefak analisis lama wajib dibuang agar tidak stale.
                 try:
                     _invalidate_previous_analysis()
                 except Exception as exc:
@@ -294,6 +382,7 @@ def render_ingestion_panel() -> None:
                     st.session_state.osint_proc = subprocess.Popen(
                         orch_cmd,
                         cwd=str(ROOT_DIR),
+                        env=os.environ.copy(),
                         stdout=log_handle,
                         stderr=subprocess.STDOUT,
                     )
@@ -310,7 +399,6 @@ def render_ingestion_panel() -> None:
                     st.rerun()
                 st.rerun()
 
-            # Proses NLP selesai. Dashboard hanya boleh dibuka jika output terbaru lengkap.
             elif st.session_state.osint_stage == "analyzing":
                 st.session_state.osint_proc = None
                 log_handle = st.session_state.get("osint_log_handle")
@@ -354,3 +442,5 @@ def render_ingestion_panel() -> None:
             st.error(st.session_state.osint_error_message or "Pipeline berhenti dengan error.")
             with st.expander("Lihat Log Terakhir", expanded=True):
                 st.code(_tail_log(28), language="text")
+
+    render_api_config_panel()

@@ -177,8 +177,6 @@ def scrape_youtube_by_keywords(api_key, queries, max_videos_per_query=5,
     from googleapiclient.discovery import build
     import httplib2
 
-    # Tanpa timeout, satu request search/komentar dapat menahan gather()
-    # sehingga master_osint_data.csv tidak pernah mencapai tahap penyimpanan.
     http = httplib2.Http(timeout=25)
     youtube = build(
         "youtube",
@@ -227,11 +225,7 @@ def scrape_youtube_by_keywords(api_key, queries, max_videos_per_query=5,
 # -----------------------------
 def scrape_news(rss_url, limit=200, topic="", source_name="News", cutoff_dt=None,
                 topic_filters=None):
-    """Ambil RSS dengan timeout jaringan dan fallback ke ringkasan RSS.
-
-    Fetch full article dibatasi agar satu portal/artikel yang lambat tidak
-    menahan penyelesaian seluruh pipeline.
-    """
+    """Ambil RSS dengan timeout jaringan dan fallback ke ringkasan RSS."""
     import feedparser
     import requests
     import trafilatura
@@ -284,7 +278,6 @@ def scrape_news(rss_url, limit=200, topic="", source_name="News", cutoff_dt=None
 
         valid_entries.append((entry, pub_raw, initial_topics))
 
-    # RSS summary tetap dipakai bila fetch artikel gagal/timeout.
     def _process_entry(idx_item):
         idx, (entry, pub_raw, initial_topics) = idx_item
         title = entry.get("title", "")
@@ -292,8 +285,6 @@ def scrape_news(rss_url, limit=200, topic="", source_name="News", cutoff_dt=None
         article_text = ""
         article_url = entry.get("link", "")
 
-        # Batasi full-text fetch hanya ke 8 artikel per portal.
-        # Connect timeout 5s + read timeout 12s mencegah request menggantung.
         if idx < 8 and source_name not in ["Tempo", "Tempo Bisnis"] and article_url:
             try:
                 article_response = requests.get(
@@ -333,7 +324,6 @@ def scrape_news(rss_url, limit=200, topic="", source_name="News", cutoff_dt=None
             "url": article_url,
         }
 
-    # Sedikit worker mengurangi ledakan koneksi saat beberapa RSS diproses serentak.
     with ThreadPoolExecutor(max_workers=4) as executor:
         processed = list(executor.map(_process_entry, enumerate(valid_entries)))
 
@@ -347,8 +337,17 @@ def scrape_news(rss_url, limit=200, topic="", source_name="News", cutoff_dt=None
 
 
 # -----------------------------
-# GOOGLE TRENDS SCRAPER
+# GOOGLE TRENDS SCRAPER (MULTI-BATCH + OR QUERY + URLLIB3 FIX)
 # -----------------------------
+def _to_trends_query(label: str) -> str:
+    """Ubah 'polisi/polri' menjadi 'polisi + polri' untuk query OR Google Trends."""
+    parts = [p.strip() for p in re.split(r"\s*(?:/|\||\+)\s*", label) if p.strip()]
+    if len(parts) <= 1:
+        return label.strip()
+    formatted = [f'"{p}"' if " " in p else p for p in parts]
+    return " + ".join(formatted)
+
+
 def scrape_google_trends_series(keywords, timeframe="today 1-m", geo="ID"):
     try:
         from pytrends.request import TrendReq
@@ -356,7 +355,7 @@ def scrape_google_trends_series(keywords, timeframe="today 1-m", geo="ID"):
         logger.warning("[Google Trends] Package 'pytrends' belum terinstall.")
         return []
 
-    # Kompatibilitas urllib3 2.0+
+    # Kompatibilitas urllib3 2.0+: terjemahkan method_whitelist ke allowed_methods
     try:
         import inspect
         from urllib3.util.retry import Retry
@@ -373,7 +372,6 @@ def scrape_google_trends_series(keywords, timeframe="today 1-m", geo="ID"):
     except Exception:
         pass
 
-    # Bersihkan & dedup keyword tanpa membatasi 5
     clean_kws = []
     for k in keywords or []:
         k_clean = str(k).strip()
@@ -385,8 +383,10 @@ def scrape_google_trends_series(keywords, timeframe="today 1-m", geo="ID"):
     logger.info("[Google Trends] Mulai mengambil %d keyword (%s).", len(clean_kws), timeframe)
     pytrends = TrendReq(hl="id-ID", tz=420, timeout=(8, 20), retries=1, backoff_factor=0.2)
 
-    # Bagi menjadi batch maks. 5 keyword dengan 1 anchor bersama agar skala 0-100 konsisten
+    # Bagi ke batch maks. 5 keyword dengan 1 anchor bersama agar skala 0-100 seragam
+    query_map = {label: _to_trends_query(label) for label in clean_kws}
     anchor = clean_kws[0]
+    anchor_q = query_map[anchor]
     batches = [clean_kws[:5]]
     for i in range(5, len(clean_kws), 4):
         batches.append([anchor] + clean_kws[i : i + 4])
@@ -399,7 +399,8 @@ def scrape_google_trends_series(keywords, timeframe="today 1-m", geo="ID"):
             time.sleep(2.5)  # Jeda antar-batch untuk menghindari rate-limit HTTP 429
 
         try:
-            pytrends.build_payload(batch, cat=0, timeframe=timeframe, geo=geo)
+            payload_queries = [query_map[kw] for kw in batch]
+            pytrends.build_payload(payload_queries, cat=0, timeframe=timeframe, geo=geo)
             df_interest = pytrends.interest_over_time()
         except Exception as exc:
             logger.warning("[Google Trends] Batch %d/%d (%s) gagal: %s", idx + 1, len(batches), batch, exc)
@@ -411,18 +412,19 @@ def scrape_google_trends_series(keywords, timeframe="today 1-m", geo="ID"):
             df_interest = df_interest.drop(columns=["isPartial"])
 
         if idx == 0:
-            anchor_ref = df_interest[anchor].astype(float)
+            anchor_ref = df_interest[anchor_q].astype(float)
             for kw in batch:
-                if kw in df_interest.columns:
-                    combined_series[kw] = df_interest[kw].astype(float)
+                q = query_map[kw]
+                if q in df_interest.columns:
+                    combined_series[kw] = df_interest[q].astype(float)
         else:
-            # Kalibrasi skor batch terhadap anchor di batch pertama
-            batch_anchor = df_interest[anchor].astype(float)
+            batch_anchor = df_interest[anchor_q].astype(float)
             denom = float(batch_anchor.sum())
             scale = float(anchor_ref.sum()) / denom if (anchor_ref is not None and denom > 0) else 1.0
             for kw in batch:
-                if kw != anchor and kw in df_interest.columns:
-                    combined_series[kw] = df_interest[kw].astype(float) * scale
+                q = query_map[kw]
+                if kw != anchor and q in df_interest.columns:
+                    combined_series[kw] = df_interest[q].astype(float) * scale
 
     if not combined_series:
         return []
@@ -613,3 +615,96 @@ async def scrape_x(cookies_path, raw_query, cutoff_dt, limit=100, client=None):
             logger.warning("[X/Twitter] Query '%s' terhenti | ERR: %s", raw_query, err_msg)
 
     return data
+
+
+# -----------------------------
+# INSTAGRAM & THREADS SCRAPER (API ADAPTER)
+# -----------------------------
+def scrape_instagram_by_keywords(api_key, queries, limit_per_query=50, cutoff_dt=None):
+    """Adapter scraping Instagram berbasis API berbayar (Apify/RapidAPI/Graph)."""
+    import requests
+
+    if not api_key:
+        raise RuntimeError("INSTAGRAM_API_KEY belum diatur (konektor dalam mode standby).")
+
+    records = []
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    for query in queries:
+        logger.info("[Instagram] Cari hashtag/query: '%s'", query)
+        endpoint = "https://api.apify.com/v2/acts/apify~instagram-hashtag-scraper/run-sync-get-dataset-items"
+        resp = requests.post(
+            endpoint,
+            headers=headers,
+            json={"hashtags": [query.replace(" ", "")], "resultsLimit": limit_per_query},
+            timeout=(10, 45),
+        )
+        resp.raise_for_status()
+
+        for item in resp.json():
+            ts_raw = item.get("timestamp")
+            if cutoff_dt and ts_raw:
+                ts_val = pd.to_datetime(ts_raw, utc=True, errors="coerce")
+                if pd.notna(ts_val) and ts_val < cutoff_dt:
+                    continue
+
+            caption = item.get("caption") or ""
+            if not caption.strip():
+                continue
+
+            records.append({
+                "timestamp": ts_raw,
+                "platform": "Instagram",
+                "author": item.get("ownerUsername", "unknown"),
+                "text": caption,
+                "engagement": int(item.get("likesCount", 0)) + int(item.get("commentsCount", 0)),
+                "topic": query,
+                "url": item.get("url", ""),
+            })
+
+    return records
+
+
+def scrape_threads_by_keywords(api_key, queries, limit_per_query=50, cutoff_dt=None):
+    """Adapter scraping Meta Threads berbasis API berbayar."""
+    import requests
+
+    if not api_key:
+        raise RuntimeError("THREADS_API_KEY belum diatur (konektor dalam mode standby).")
+
+    records = []
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    for query in queries:
+        logger.info("[Threads] Cari query: '%s'", query)
+        endpoint = "https://api.apify.com/v2/acts/apify~threads-scraper/run-sync-get-dataset-items"
+        resp = requests.post(
+            endpoint,
+            headers=headers,
+            json={"searchQueries": [query], "maxItems": limit_per_query},
+            timeout=(10, 45),
+        )
+        resp.raise_for_status()
+
+        for item in resp.json():
+            ts_raw = item.get("publishedAt") or item.get("timestamp")
+            if cutoff_dt and ts_raw:
+                ts_val = pd.to_datetime(ts_raw, utc=True, errors="coerce")
+                if pd.notna(ts_val) and ts_val < cutoff_dt:
+                    continue
+
+            text_body = item.get("text") or item.get("caption") or ""
+            if not text_body.strip():
+                continue
+
+            records.append({
+                "timestamp": ts_raw,
+                "platform": "Threads",
+                "author": item.get("username", "unknown"),
+                "text": text_body,
+                "engagement": int(item.get("likeCount", 0)) + int(item.get("replyCount", 0)),
+                "topic": query,
+                "url": item.get("url", ""),
+            })
+
+    return records

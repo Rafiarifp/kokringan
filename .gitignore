@@ -1,11 +1,7 @@
 # Kecualikan file sensitif, lokal, dan cache saja:
 .env
 *.session
-cookies.json
 .venv/
 __pycache__/
-data/*.csv
-data/*.json
-data/*.log
 *.png
 *.pptx

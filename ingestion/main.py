@@ -27,15 +27,21 @@ from ingestion.scrape import (
     scrape_telegram_channels,
     get_or_refresh_x_client,
     scrape_x,
+    scrape_instagram_by_keywords,
+    scrape_threads_by_keywords,
     timeframe_to_trends_timeframe,
     detect_matching_topics,
 )
 
+LOG_FILE = Path("data/scrape.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-7s | %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[logging.StreamHandler()],
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8"),
+    ],
     force=True,
 )
 logger = logging.getLogger("osint_main")
@@ -52,6 +58,8 @@ ENABLE_NEWS = True
 ENABLE_GOOGLE_TRENDS = True
 ENABLE_TELEGRAM = True
 ENABLE_X = False
+ENABLE_INSTAGRAM = False
+ENABLE_THREADS = False
 
 
 def _load_existing_dataset(output_path: Path, slang_dict: dict, cutoff_dt=None) -> pd.DataFrame:
@@ -69,8 +77,6 @@ def _load_existing_dataset(output_path: Path, slang_dict: dict, cutoff_dt=None) 
         old_df = old_df.dropna(subset=["timestamp"])
         old_df["timestamp"] = old_df["timestamp"].dt.tz_convert(TIMEZONE)
 
-        # Update Data mempertahankan seluruh histori. Cutoff hanya diterapkan
-        # bila caller memang meminta pembatasan data lama.
         if cutoff_dt is not None:
             cutoff_tz = pd.to_datetime(cutoff_dt, utc=True).tz_convert(TIMEZONE)
             old_df = old_df[old_df["timestamp"] >= cutoff_tz].copy()
@@ -117,12 +123,7 @@ def _apply_topic_filter_to_sources(
     news_sources: set[str],
     label: str,
 ) -> pd.DataFrame:
-    """Filter record Telegram dan portal berita berdasarkan isi teks.
-
-    Fungsi ini juga diterapkan ke CSV lama agar data tidak relevan yang pernah
-    tersimpan sebelum filter diaktifkan tidak ikut dipertahankan. Sumber lain
-    (YouTube, X, dan lainnya) tidak diubah.
-    """
+    """Filter record Telegram dan portal berita berdasarkan isi teks."""
     if df.empty or topic_filters is None:
         return df
 
@@ -161,6 +162,8 @@ async def main(
         "google_trends": ENABLE_GOOGLE_TRENDS,
         "telegram": ENABLE_TELEGRAM,
         "x": ENABLE_X,
+        "instagram": ENABLE_INSTAGRAM,
+        "threads": ENABLE_THREADS,
     }
 
     if sources is not None:
@@ -171,7 +174,7 @@ async def main(
         active = default_switches
 
     logger.info("Memuat konfigurasi targets.json.")
-    targets_path = Path("config/targets.json")
+    targets_path = Path("config/targets.json") if Path("config/targets.json").exists() else Path("targets.json")
     if not targets_path.exists():
         logger.error("File targets.json tidak ditemukan!")
         return
@@ -190,18 +193,17 @@ async def main(
         return False
 
     if replace_existing and sources is not None:
-        data_sources = {"youtube", "news", "telegram", "x"}
+        data_sources = {"youtube", "news", "telegram", "x", "instagram", "threads"}
         if not (normalized or set()).intersection(data_sources):
             logger.error(
                 "Delete Old Data membutuhkan minimal satu sumber dataset "
-                "(YouTube, News, Telegram, atau X). Google Trends menyimpan file terpisah."
+                "(YouTube, News, Telegram, Instagram, Threads, atau X)."
             )
             return False
 
-    output_csv = settings.get("output_csv", "master_osint_data.csv")
-    slang_file = settings.get("slang_file", "slang_dict.json")
+    output_csv = settings.get("output_csv", "data/master_osint_data.csv")
+    slang_file = settings.get("slang_file", "config/slang_dict.json")
 
-    # Filter topik hanya diterapkan pada News RSS dan Telegram.
     filter_cfg = targets.get("topic_filters", {})
     topic_filters = None
     if filter_cfg.get("enabled", False):
@@ -213,10 +215,7 @@ async def main(
             )
             return
         topic_filters = configured_topics
-        logger.info(
-            "[Topic Filter] Aktif | %d kategori topik.",
-            len(topic_filters),
-        )
+        logger.info("[Topic Filter] Aktif | %d kategori topik.", len(topic_filters))
     else:
         logger.warning("[Topic Filter] Nonaktif | News dan Telegram tidak difilter.")
 
@@ -300,7 +299,7 @@ async def main(
     if active["google_trends"] and (sources is not None or cfg_trends.get("enabled", False)):
         keywords = cfg_trends.get("keywords", [])
         if keywords:
-            trends_csv = settings.get("trends_csv", "trends_interest.csv")
+            trends_csv = settings.get("trends_csv", "data/trends_interest.csv")
             trends_tf = timeframe_to_trends_timeframe(timeframe)
 
             def _run_trends():
@@ -313,13 +312,9 @@ async def main(
                 )
                 trends_failed = any(name == "Google Trends" for name, _ in scrape_errors)
                 if replace_existing and trends_failed and not trends:
-                    logger.warning(
-                        "[Google Trends] Refresh gagal; trends CSV lama dipertahankan."
-                    )
+                    logger.warning("[Google Trends] Refresh gagal; trends CSV lama dipertahankan.")
                 else:
-                    total = save_trends_csv(
-                        trends, trends_csv, replace=replace_existing
-                    )
+                    total = save_trends_csv(trends, trends_csv, replace=replace_existing)
                     logger.info("[Google Trends] Tersimpan: %s baris (file terpisah).", total)
                 return []
 
@@ -400,8 +395,49 @@ async def main(
             logger.warning("[X/Twitter] Dilewati | ERR: %s", message)
             _record_scrape_error("X/Twitter", RuntimeError(message))
 
-    # Pantau penyelesaian setiap scraper. Master CSV baru ditulis setelah batch
-    # selesai; progress ini membantu menemukan sumber yang masih tertahan.
+    # 6. INSTAGRAM (API BERBAYAR - STANDBY / AKTIF)
+    cfg_ig = targets.get("instagram", {})
+    if active["instagram"] and (sources is not None or cfg_ig.get("enabled", False)):
+        ig_key = os.getenv("INSTAGRAM_API_KEY", "").strip()
+        if ig_key and cfg_ig.get("queries"):
+            sync_tasks.append(asyncio.to_thread(
+                safe_sync_scrape,
+                "Instagram",
+                scrape_instagram_by_keywords,
+                ig_key,
+                cfg_ig["queries"],
+                cfg_ig.get("limit_per_query", 50),
+                cutoff_dt,
+                on_error=_record_scrape_error,
+            ))
+            sync_task_labels.append("Instagram")
+        else:
+            message = "INSTAGRAM_API_KEY belum diisi (konektor dalam mode standby)."
+            logger.warning("[Instagram] Dilewati | ERR: %s", message)
+            _record_scrape_error("Instagram", RuntimeError(message))
+
+    # 7. THREADS (API BERBAYAR - STANDBY / AKTIF)
+    cfg_threads = targets.get("threads", {})
+    if active["threads"] and (sources is not None or cfg_threads.get("enabled", False)):
+        th_key = os.getenv("THREADS_API_KEY", "").strip()
+        if th_key and cfg_threads.get("queries"):
+            sync_tasks.append(asyncio.to_thread(
+                safe_sync_scrape,
+                "Threads",
+                scrape_threads_by_keywords,
+                th_key,
+                cfg_threads["queries"],
+                cfg_threads.get("limit_per_query", 50),
+                cutoff_dt,
+                on_error=_record_scrape_error,
+            ))
+            sync_task_labels.append("Threads")
+        else:
+            message = "THREADS_API_KEY belum diisi (konektor dalam mode standby)."
+            logger.warning("[Threads] Dilewati | ERR: %s", message)
+            _record_scrape_error("Threads", RuntimeError(message))
+
+    # Pantau penyelesaian setiap scraper.
     pending_scrapers = list(zip(
         sync_tasks + async_tasks,
         sync_task_labels + async_task_labels,
@@ -462,29 +498,12 @@ async def main(
     output_path = Path(output_csv)
 
     if replace_existing:
-        # DELETE OLD DATA: bangun dataset hanya dari hasil scraping saat ini.
-        # CSV lama baru diganti setelah file baru berhasil ditulis secara atomik.
-        logger.info(
-            "[DELETE OLD DATA] CSV lama tidak akan digabungkan ke dataset baru."
-        )
-        combined = (
-            new_df.copy()
-            if not new_df.empty
-            else pd.DataFrame(columns=COLUMNS)
-        )
+        logger.info("[DELETE OLD DATA] CSV lama tidak akan digabungkan ke dataset baru.")
+        combined = new_df.copy() if not new_df.empty else pd.DataFrame(columns=COLUMNS)
     else:
-        # UPDATE DATA: pertahankan semua histori dan tambahkan hasil scraping baru.
-        old_df = _load_existing_dataset(
-            output_path,
-            slang_dict,
-            cutoff_dt=None,
-        )
+        old_df = _load_existing_dataset(output_path, slang_dict, cutoff_dt=None)
         frames = [df for df in (old_df, new_df) if not df.empty]
-        combined = (
-            pd.concat(frames, ignore_index=True)
-            if frames
-            else pd.DataFrame(columns=COLUMNS)
-        )
+        combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=COLUMNS)
 
     should_write = replace_existing or not combined.empty or topic_filters is not None
     if should_write:
@@ -500,8 +519,6 @@ async def main(
         else:
             combined = pd.DataFrame(columns=COLUMNS)
 
-        # Tulis ke file sementara terlebih dahulu. CSV lama baru diganti setelah
-        # proses scraping selesai dan file baru berhasil ditulis.
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
         try:
@@ -531,7 +548,10 @@ async def main(
         summary_lines.append("\nJumlah data per platform:")
         summary_lines.append(combined["platform"].value_counts().to_string())
 
-    print("\n".join(summary_lines))
+    summary_text = "\n".join(summary_lines)
+    print(summary_text)
+    with LOG_FILE.open("a", encoding="utf-8") as lf:
+        lf.write(summary_text + "\n")
     return True
 
 
@@ -551,7 +571,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sources",
         nargs="+",
-        choices=["youtube", "news", "google_trends", "telegram", "x"],
+        choices=["youtube", "news", "google_trends", "telegram", "x", "instagram", "threads"],
         help="Pilih sumber spesifik untuk di-scrape (contoh: --sources telegram news)",
     )
     parser.add_argument(
