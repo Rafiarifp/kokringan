@@ -50,3 +50,26 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
 [5/6] Detecting anomalies and evaluating DISARM risk...
 [6/6] Synthesizing executive intelligence report...
 Completed: data/master_osint_enriched.csv (1,114 rows) & data/cyberlens_report.json
+
+=== NLP WAJIB: MEMULAI ANALISIS SETELAH SCRAPING ===
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[0/6] Dataset normalized: 1,114 posts | Target: Semua Topik OSINT
+[1/6] Running IndoBERT Sentiment, Sarcasm & SentenceTransformer Embeddings...
+Loading weights:   0%|          | 0/201 [00:00<?, ?it/s]Loading weights: 100%|##########| 201/201 [00:00<00:00, 8318.50it/s]
+Loading weights:   0%|          | 0/201 [00:00<?, ?it/s]Loading weights:   5%|5         | 11/201 [00:00<00:02, 91.88it/s]Loading weights:  10%|#         | 21/201 [00:00<00:02, 85.27it/s]Loading weights:  15%|#4        | 30/201 [00:00<00:02, 70.65it/s]Loading weights:  20%|##        | 41/201 [00:00<00:01, 82.06it/s]Loading weights:  29%|##8       | 58/201 [00:00<00:01, 99.58it/s]Loading weights: 100%|##########| 201/201 [00:00<00:00, 310.47it/s]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Downloads\KOKRINGAN\pipeline\orchestrator.py", line 324, in <module>
+    run_cyberlens_pipeline(
+  File "D:\Downloads\KOKRINGAN\pipeline\orchestrator.py", line 225, in run_cyberlens_pipeline
+    df, combined_sentiment_result, embeddings = engine.enrich_dataframe(
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Downloads\KOKRINGAN\nlp\inference_engine.py", line 394, in enrich_dataframe
+    embeddings = self.embedding_runner.encode(texts, batch_size=embedding_batch_size)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Downloads\KOKRINGAN\nlp\inference_engine.py", line 234, in encode
+    self.load()
+  File "D:\Downloads\KOKRINGAN\nlp\inference_engine.py", line 220, in load
+    from sentence_transformers import SentenceTransformer
+ModuleNotFoundError: No module named 'sentence_transformers'
