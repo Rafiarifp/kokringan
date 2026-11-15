@@ -1,0 +1,229 @@
+{
+  "metadata": {
+    "dataset_type": "SYNTHETIC_DEMO_ONLY",
+    "generated_at": "2026-11-15T15:50:28+00:00",
+    "record_count": 2000,
+    "note": "Seluruh rekaman, akun, kanal, skor, klaster, dan alert dibuat secara sintetis. Bukan hasil scraping dan bukan pernyataan tentang kejadian nyata.",
+    "seed": 20261115
+  },
+  "intelligence_summary": {
+    "summary": "DATA SIMULASI: Dashboard ini menggunakan 2.000 rekaman sintetis untuk demonstrasi alur pemantauan lintas platform. Topik, sentimen, klaster, dan alert tidak menggambarkan kejadian atau aktor nyata.",
+    "key_findings": [
+      "Dataset demo berisi 2,000 rekaman sintetis dari YouTube, Telegram, dan News.",
+      "Tema contoh mencakup layanan publik, keamanan digital, ekonomi, dan isu sosial.",
+      "Sebagian rekaman diberi label klaster dan indikasi sarkasme untuk menguji visualisasi.",
+      "Semua URL menggunakan domain .invalid dan tidak mengarah ke sumber publik."
+    ],
+    "recommendations": [
+      "Gunakan dataset ini hanya untuk demo UI, pengujian, dokumentasi, dan presentasi juri.",
+      "Jangan gunakan metrik atau alert simulasi sebagai temuan intelijen faktual.",
+      "Pisahkan dataset lokal hasil scraping dari file demo yang akan dipublikasikan."
+    ]
+  },
+  "narratives": [
+    {
+      "cluster_id": 0,
+      "narrative_title": "Simulasi narasi: KPK korupsi",
+      "post_count": 64,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 1,
+      "narrative_title": "Simulasi narasi: PHK massal",
+      "post_count": 63,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 2,
+      "narrative_title": "Simulasi narasi: nilai rupiah",
+      "post_count": 56,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 3,
+      "narrative_title": "Simulasi narasi: demo mahasiswa",
+      "post_count": 52,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 4,
+      "narrative_title": "Simulasi narasi: kebocoran data",
+      "post_count": 52,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 8,
+      "narrative_title": "Simulasi narasi: keamanan siber",
+      "post_count": 47,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 7,
+      "narrative_title": "Simulasi narasi: hoaks",
+      "post_count": 40,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 6,
+      "narrative_title": "Simulasi narasi: kebijakan PPN",
+      "post_count": 35,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 5,
+      "narrative_title": "Simulasi narasi: aksi ojol",
+      "post_count": 30,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    },
+    {
+      "cluster_id": 9,
+      "narrative_title": "Simulasi narasi: transportasi publik",
+      "post_count": 25,
+      "platforms": [
+        "News",
+        "Telegram",
+        "YouTube"
+      ]
+    }
+  ],
+  "anomalies": {
+    "alerts": [
+      {
+        "time_bucket": "2026-08-27T23:59:59+00:00",
+        "detected_at": "2026-08-27T23:59:59+00:00",
+        "anomaly_type": "volume_spike",
+        "severity": "medium",
+        "platform": "News",
+        "affected_platforms": [
+          "News",
+          "YouTube",
+          "Telegram"
+        ],
+        "description": "Peningkatan volume unggahan pada korpus simulasi."
+      },
+      {
+        "time_bucket": "2026-09-06T23:59:59+00:00",
+        "detected_at": "2026-09-06T23:59:59+00:00",
+        "anomaly_type": "sentiment_shift",
+        "severity": "low",
+        "platform": "Telegram",
+        "affected_platforms": [
+          "Telegram",
+          "YouTube"
+        ],
+        "description": "Perubahan proporsi sentimen pada data simulasi."
+      },
+      {
+        "time_bucket": "2026-09-16T23:59:59+00:00",
+        "detected_at": "2026-09-16T23:59:59+00:00",
+        "anomaly_type": "cross_platform_activity",
+        "severity": "medium",
+        "platform": "YouTube",
+        "affected_platforms": [
+          "YouTube",
+          "Telegram",
+          "News"
+        ],
+        "description": "Aktivitas lintas platform pada klaster simulasi."
+      },
+      {
+        "time_bucket": "2026-09-26T23:59:59+00:00",
+        "detected_at": "2026-09-26T23:59:59+00:00",
+        "anomaly_type": "volume_spike",
+        "severity": "high",
+        "platform": "News",
+        "affected_platforms": [
+          "News",
+          "YouTube"
+        ],
+        "description": "Lonjakan volume simulasi melewati ambang demo."
+      },
+      {
+        "time_bucket": "2026-10-06T23:59:59+00:00",
+        "detected_at": "2026-10-06T23:59:59+00:00",
+        "anomaly_type": "sentiment_shift",
+        "severity": "medium",
+        "platform": "Telegram",
+        "affected_platforms": [
+          "Telegram",
+          "News",
+          "YouTube"
+        ],
+        "description": "Pergeseran sentimen simulasi pada interval waktu tertentu."
+      },
+      {
+        "time_bucket": "2026-10-16T23:59:59+00:00",
+        "detected_at": "2026-10-16T23:59:59+00:00",
+        "anomaly_type": "cross_platform_activity",
+        "severity": "low",
+        "platform": "YouTube",
+        "affected_platforms": [
+          "YouTube",
+          "Telegram"
+        ],
+        "description": "Pola percakapan lintas platform untuk pengujian."
+      },
+      {
+        "time_bucket": "2026-10-26T23:59:59+00:00",
+        "detected_at": "2026-10-26T23:59:59+00:00",
+        "anomaly_type": "volume_spike",
+        "severity": "low",
+        "platform": "Telegram",
+        "affected_platforms": [
+          "YouTube",
+          "Telegram",
+          "News"
+        ],
+        "description": "Fluktuasi volume pada data buatan."
+      },
+      {
+        "time_bucket": "2026-11-05T23:59:59+00:00",
+        "detected_at": "2026-11-05T23:59:59+00:00",
+        "anomaly_type": "sentiment_shift",
+        "severity": "high",
+        "platform": "News",
+        "affected_platforms": [
+          "News",
+          "Telegram"
+        ],
+        "description": "Perubahan distribusi sentimen pada data simulasi."
+      }
+    ]
+  }
+}
